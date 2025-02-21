@@ -10,21 +10,22 @@ process MOTUS {
     publishDir "${params.outdir}/mOTUs/", mode: 'copy'
 
     label 'motus'
-
+    tag "${sample_name}"
     container 'quay.io/biocontainers/motus:3.0.3--pyhdfd78af_0'
 
     input:
-    path reads
+    tuple val(sample_name), path(reads)
     path motus_db
 
     output:
+    val sample_name, emit: sample_name
     path "*.motus", emit: motus_result
     path "*.tsv", emit: motus_result_cleaned
     path "${reads.simpleName}_motus.log", emit: motus_log
 
     script:
     """
-    gunzip ${reads}
+    gzip -d --force ${reads}
     echo 'Run mOTUs'
 
     motus profile -c -q \
@@ -52,20 +53,14 @@ process MOTUS {
 */
 process MOTUS_DOWNLOAD_DB {
 
-    publishDir(
-        "${params.databases}/${params.motus_db_name}",
-
-        mode: 'copy'
-    )
-
+    publishDir "${params.databases.cache_path}", mode: 'copy'
+    
+    label 'motus_download'
     container "quay.io/biocontainers/motus:3.0.3--pyhdfd78af_0"
 
-    label 'motus_download'
-
-    input:
-
     output:
-    path "*", emit: db
+        path "db_mOTU", emit: db_dir
+        path "db_mOTU/*", emit: db
 
     script:
     """
@@ -75,7 +70,8 @@ process MOTUS_DOWNLOAD_DB {
     ## NOTE: container required
     cp /usr/local/lib/python3.9/site-packages/motus/downloadDB.py downloadDB.py
     python downloadDB.py -t $task.cpus
-    mv db_mOTU/* .
-    rm -r db_mOTU/ downloadDB.py
+    # mv db_mOTU/* .
+    # rm -r db_mOTU/
+    rm downloadDB.py
     """
 }

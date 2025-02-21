@@ -5,14 +5,16 @@
 process CMSEARCH {
 
     label 'cmsearch'
-
+    tag "${sample_name}"
     container 'quay.io/biocontainers/infernal:1.1.4--pl5321hec16e2b_1'
 
     input:
+    val sample_name
     path sequences
-    file covariance_model_database
+    each covariance_model_database
 
     output:
+    val sample_name, emit: sample_name
     path "${sequences.baseName}*.cmsearch_matches.tbl", emit: cmsearch
 
     script:
@@ -29,5 +31,3 @@ process CMSEARCH {
     ${sequences}
     """
 }
-
-

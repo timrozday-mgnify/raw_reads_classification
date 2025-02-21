@@ -16,6 +16,8 @@ process RETURN_FILES {
     )
 
     container 'quay.io/biocontainers/infernal:1.1.4--pl5321hec16e2b_1'
+    tag "${name}"
+    label 'process_single'
 
     stageInMode 'copy'
 
@@ -40,34 +42,36 @@ process RETURN_FILES {
 
 workflow CMSEARCH_SUBWF {
     take:
-        name
+        sample_name
         sequences
         covariance_model_database
         clan_information
     main:
-        // chunk sequences
-        sequence_chunks_ch = sequences.splitFasta(
-            by: 100000,
-            file: true
-        )
         // cat models
+        
+        CMSEARCH(sample_name, sequences, covariance_model_database)
 
-        CMSEARCH(sequence_chunks_ch, covariance_model_database.first())
-
-        CMSEARCH_DEOVERLAP(clan_information.first(), CMSEARCH.out.cmsearch)
+        CMSEARCH_DEOVERLAP(CMSEARCH.out.sample_name, clan_information, CMSEARCH.out.cmsearch)
 
         // cat cmsearch
-        cmsearch_result = CMSEARCH.out.cmsearch.collectFile(name: "cmsearch.tbl", newLine: true)
+        cmsearch_result = CMSEARCH.out.sample_name.merge(CMSEARCH.out.cmsearch)
+        cmsearch_result.collectFile(name: "cmsearch.tbl", newLine: true)
 
         // cat deoverlapped
-        cmsearch_result_deoverlapped = CMSEARCH_DEOVERLAP.out.cmsearch_deoverlap.collectFile(name: "deoverlapped.tbl")
+        cmsearch_result_deoverlapped = CMSEARCH_DEOVERLAP.out.sample_name.merge(CMSEARCH_DEOVERLAP.out.cmsearch_deoverlap)
+        cmsearch_result_deoverlapped.collectFile(name: "deoverlapped.tbl")
 
-        EASEL_EXTRACT_BY_COORD(sequences, cmsearch_result_deoverlapped)
+        easel_ch = sample_name.merge(sequences).join(cmsearch_result_deoverlapped)
+        EASEL_EXTRACT_BY_COORD(easel_ch.map{ it[0] }, easel_ch.map{ it[1] }, easel_ch.map{ it[2] })
 
-        EXTRACT_MODELS(name, EASEL_EXTRACT_BY_COORD.out.models_fasta)
+        extract_ch = EASEL_EXTRACT_BY_COORD.out.sample_name.merge(EASEL_EXTRACT_BY_COORD.out.models_fasta)
+        EXTRACT_MODELS(extract_ch.map{ it[0] }, extract_ch.map{ it[1] })
 
-        RETURN_FILES(name, cmsearch_result, cmsearch_result_deoverlapped)
+        output_ch = cmsearch_result.join(cmsearch_result_deoverlapped) 
+
+        RETURN_FILES(output_ch.map{ it[0] }, output_ch.map{ it[1] }, output_ch.map{ it[2] })
     emit:
+        sample_name = EXTRACT_MODELS.out.sample_name
         cmsearch_lsu_fasta = EXTRACT_MODELS.out.lsu_fasta
         cmsearch_ssu_fasta = EXTRACT_MODELS.out.ssu_fasta
         seq_cat = EXTRACT_MODELS.out.seq_cat_folder

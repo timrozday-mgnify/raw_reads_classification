@@ -1,39 +1,15 @@
 /*
     ~~~~~~~~~~~~~~~~~~
-     Input validation
-    ~~~~~~~~~~~~~~~~~~
-*/
-sample_name = channel.value(params.sample_name)
-mode = channel.value(params.mode)
-
-if ( params.reads_accession ) {
-    // The "mode" is also required but not needed to pull the reads //
-    chosen_reads = channel.empty()
-} else {
-    if ( params.mode == "paired" ) {
-        chosen_reads = channel.fromFilePairs(["${params.paired_end_forward}", "${params.paired_end_reverse}"], checkIfExists: true).map { it[1] }
-    }
-    else if ( params.mode == "single" ) {
-        chosen_reads = channel.fromPath("${params.single_end}", checkIfExists: true)
-    }
-}
-
-if ( params.reads_accession && (params.paired_end_forward || params.paired_end_reverse || params.single_end) ) {
-    exit 1, "If --reads_accession is provided, paired_end_forward, paired_end_reverse and single_end are invalid."
-}
-
-/*
-    ~~~~~~~~~~~~~~~~~~
      Steps
     ~~~~~~~~~~~~~~~~~~
 */
 include { QC } from '../subworkflows/qc_swf'
-include { MAPSEQ_OTU_KRONA as MAPSEQ_OTU_KRONA_LSU} from '../subworkflows/mapseq_otu_krona_swf'
-include { MAPSEQ_OTU_KRONA as MAPSEQ_OTU_KRONA_SSU} from '../subworkflows/mapseq_otu_krona_swf'
+include { MAPSEQ_OTU_KRONA } from '../subworkflows/mapseq_otu_krona_swf'
 include { CMSEARCH_SUBWF } from '../subworkflows/cmsearch_swf'
-include { FETCHTOOL } from '../modules/fetchtool'
+include { FETCHTOOL_RAWREADS } from '../modules/fetchtool'
 include { MOTUS } from '../modules/motus'
 include { MULTIQC } from '../modules/multiqc'
+include { FETCH_READS } from '../subworkflows/fetch_reads'
 
 /*
     ~~~~~~~~~~~~~~~~~~
@@ -41,119 +17,149 @@ include { MULTIQC } from '../modules/multiqc'
     ~~~~~~~~~~~~~~~~~~
 */
 include { DOWNLOAD_MOTUS_DB } from '../subworkflows/prepare_dbs'
-include { DOWNLOAD_REFERENCE_GENOME } from '../subworkflows/prepare_dbs'
+include { DOWNLOAD_HOST_REFERENCE_GENOME } from '../subworkflows/prepare_dbs'
 include { DOWNLOAD_RFAM } from '../subworkflows/prepare_dbs'
 include { DOWNLOAD_MAPSEQ_SSU } from '../subworkflows/prepare_dbs'
 include { DOWNLOAD_MAPSEQ_LSU } from '../subworkflows/prepare_dbs'
+
+// Import samplesheetToList from nf-schema //
+include { samplesheetToList } from 'plugin/nf-schema'
+
 /*
     ~~~~~~~~~~~~~~~~~~
      Run workflow
     ~~~~~~~~~~~~~~~~~~
 */
 workflow PIPELINE {
+    // Read input samplesheet and validate it using schema_input.json //
+    samplesheet = samplesheetToList(params.input, "./assets/schema_input.json") 
+    // samplesheet_ch = Channel.fromList(samplesheet)
+    // samplesheet_ch.view{ "samplesheet - ${it}" }
 
-    if ( params.reads_accession ) {
-        // Sorting this is required to guarantee the order for
-        // pair end reads
-        FETCHTOOL(params.reads_accession)
-        chosen_reads = FETCHTOOL.out.reads
+    sample2fp_list = []
+    samplesheet.each{
+        meta, fq1, fq2, fqb, fq1_md5, fq2_md5, fqb_md5 -> 
+        if(fq1) {
+            sample2fp_list.add([meta.id,fq1,fq1_md5,'reads'])
+        }
+        if(fq2) {
+            sample2fp_list.add([meta.id,fq2,fq2_md5,'reads'])
+        }
+        if(fqb) {
+            sample2fp_list.add([meta.id,fqb,fqb_md5,'barcodes'])
+        }
+    }
+    sizes = [:]
+    sample2fp_list.each{
+        sample_name, fp, md5, t ->
+        if(sizes[sample_name]) {
+            sizes[sample_name] += 1
+        }else{
+            sizes[sample_name] = 1
+        }
     }
 
-    if ( params.reference_genome && params.reference_genome_name ) {
-        ref_genome = channel.fromPath("${params.reference_genome}")
-        ref_genome_name = channel.value("${params.reference_genome_name}")
-    } else {
-        DOWNLOAD_REFERENCE_GENOME()
-        ref_genome = DOWNLOAD_REFERENCE_GENOME.out.ref_genome
-        ref_genome_name = channel.value("${params.decontamination_reference_index}")
+    fetch_ch = Channel.fromList(sample2fp_list)
+    // fetch_ch.view{ "fetch_ch - ${it}"}
+    FETCH_READS(fetch_ch)
+    // FETCH_READS.out.view{ "FETCH_READS.out - ${it}" }
+    
+     qc_ch = FETCH_READS.out.map{ k,fp,t -> tuple(groupKey(k,sizes[k]),tuple(fp,t))}.groupTuple() 
+     qc_ch = qc_ch.map{ k,fps -> 
+         def fps_d = [:]
+        fps.sort().each{ fp,t -> 
+            if(fps_d[t]) {
+                fps_d[t].add(fp)
+            }else{
+                fps_d[t] = [fp]
+            }
+        }
+        return tuple(k,fps_d)
     }
+    qc_ch = qc_ch.filter{ (it[1].reads) && (it[1].reads.size()>0)}.map{ k,fps -> ['meta': ['id': k],'reads': fps,'mode': fps.reads.size()>1 ? 'paired':'single'] }
+    // qc_ch.view{ "qc_ch - ${it}" }
+
+    DOWNLOAD_HOST_REFERENCE_GENOME()
+    ref_genome_dir = DOWNLOAD_HOST_REFERENCE_GENOME.out.ref_genome_dir
+    // ref_genome_dir.view{ "ref_genome_dir - ${it}"}
 
     QC(
-        sample_name,
-        chosen_reads,
-        mode,
-        ref_genome,
-        ref_genome_name
+        qc_ch,
+        ref_genome_dir,
     )
+    // QC.out.merged_reads.view{ "QC.out.merged_reads - ${it}" }
 
-    // mOTUs
-    if (params.motus_db) {
-        motus_db = channel.fromPath("${params.motus_db}")
-    }
-    else {
-        DOWNLOAD_MOTUS_DB()
-        motus_db = DOWNLOAD_MOTUS_DB.out.motus_db
-    }
+     // mOTUs
+    DOWNLOAD_MOTUS_DB()
+    motus_db_dir = DOWNLOAD_MOTUS_DB.out.motus_db
+    // motus_db_dir.view{ "motus_db_dir - ${it}" }
 
-    MOTUS(QC.out.merged_reads, motus_db)
-
-    // CMSEARCH prepare DBs
-    if (params.rfam_ribo_models && params.rfam_other_models && params.rfam_ribo_clan && params.rfam_other_clan) {
-        covariance_model_database_ribo = channel.fromPath("${params.rfam_ribo_models}")
-        covariance_model_database_other = channel.fromPath("${params.rfam_other_models}")
-        covariance_clan_ribo = channel.fromPath("${params.rfam_ribo_clan}")
-        covariance_clan_other = channel.fromPath("${params.rfam_other_clan}")
+    MOTUS(QC.out.merged_reads, motus_db_dir)
+    // MOTUS.out.motus_result_cleaned.view{ "MOTUS.out.motus_result_cleaned - ${it}" }
+    
+    DOWNLOAD_RFAM()
+    rfam_db_dir = DOWNLOAD_RFAM.out.rfam_db_dir
+    rfam_dbs = rfam_db_dir.multiMap{ it ->
+        ribo_models: file("${it}/${params.databases.rfam.files.ribosomal_models_file}")
+        other_models: file("${it}/${params.databases.rfam.files.other_models_file}")
+        ribo_claninfo: file("${it}/${params.databases.rfam.files.ribosomal_claninfo_file}")
+        other_claninfo: file("${it}/${params.databases.rfam.files.other_claninfo_file}")
     }
-    else {
-        DOWNLOAD_RFAM()
-        covariance_model_database_ribo = DOWNLOAD_RFAM.out.cmsearch_ribo_db
-        covariance_model_database_other = DOWNLOAD_RFAM.out.cmsearch_other_db_cat
-        covariance_clan_ribo = DOWNLOAD_RFAM.out.cmsearch_ribo_clan
-        covariance_clan_other = DOWNLOAD_RFAM.out.cmsearch_other_clan
-    }
-    covariance_cat_models = covariance_model_database_ribo.concat(covariance_model_database_other) \
-        .collectFile(name: "models.cm", newLine: true)
-
-    clan_info = covariance_clan_ribo.concat(covariance_clan_other) \
-        .collectFile(name: "clan.info")
+    // rfam_dbs.ribo_models.view{ "rfam_dbs.ribo_models - ${it}" }
+    // rfam_dbs.other_models.view{ "rfam_dbs.other_models - ${it}" }
+    // rfam_dbs.ribo_claninfo.view{ "rfam_dbs.ribo_claninfo - ${it}" }
+    // rfam_dbs.other_claninfo.view{ "rfam_dbs.other_claninfo - ${it}" }
 
     // CMSEARCH
     CMSEARCH_SUBWF(
-        sample_name,
-        QC.out.sequence,
-        covariance_cat_models,
-        clan_info
+        QC.out.sequence.map{ it[0] },
+        QC.out.sequence.map{ it[1] },
+        rfam_dbs.ribo_models,
+        rfam_dbs.ribo_claninfo
     )
-
-    // MAPSEQ LSU
-    if (CMSEARCH_SUBWF.out.cmsearch_lsu_fasta) {
-        if (params.lsu_db) {
-            mapseq_lsu = channel.fromPath("${params.lsu_db}")
-        }
-        else {
-            DOWNLOAD_MAPSEQ_LSU()
-            mapseq_lsu = DOWNLOAD_MAPSEQ_LSU.out.mapseq_db_lsu
-        }
-        MAPSEQ_OTU_KRONA_LSU(
-            CMSEARCH_SUBWF.out.cmsearch_lsu_fasta,
-            mapseq_lsu,
-            channel.value(params.lsu_db_otu),
-            channel.value(params.lsu_db_fasta),
-            channel.value(params.lsu_db_tax),
-            channel.value(params.lsu_label)
-        )
-    }
-    // MAPSEQ SSU
-    if (CMSEARCH_SUBWF.out.cmsearch_ssu_fasta) {
-        if (params.ssu_db) {
-            mapseq_ssu = channel.fromPath("${params.ssu_db}")
-        }
-        else {
-            DOWNLOAD_MAPSEQ_SSU()
-            mapseq_ssu = DOWNLOAD_MAPSEQ_SSU.out.mapseq_db_ssu
-        }
-        MAPSEQ_OTU_KRONA_SSU(
-            CMSEARCH_SUBWF.out.cmsearch_ssu_fasta,
-            mapseq_ssu,
-            channel.value(params.ssu_db_otu),
-            channel.value(params.ssu_db_fasta),
-            channel.value(params.ssu_db_tax),
-            channel.value(params.ssu_label)
-        )
+    
+    DOWNLOAD_MAPSEQ_LSU()
+    mapseq_lsu_db_dir = DOWNLOAD_MAPSEQ_LSU.out.mapseq_lsu_db_dir
+    // mapseq_lsu_db_dir.view{ "mapseq_lsu_db_dir - ${it}" }
+    
+    mapseq_lsu_dbs = mapseq_lsu_db_dir.multiMap{ it ->
+        otu: file("${it}/${params.databases.silva_lsu.files.otu}")
+        fasta: file("${it}/${params.databases.silva_lsu.files.fasta}")
+        tax: file("${it}/${params.databases.silva_lsu.files.tax}")
+        mscluster: file("${it}/${params.databases.silva_lsu.files.mscluster}")
     }
 
-    MULTIQC(
-        QC.out.fastp_json,
-        MOTUS.out.motus_log
+    MAPSEQ_OTU_KRONA(
+        CMSEARCH_SUBWF.out.sample_name,
+        CMSEARCH_SUBWF.out.cmsearch_lsu_fasta,
+        mapseq_lsu_dbs.otu,
+        mapseq_lsu_dbs.fasta,
+        mapseq_lsu_dbs.mscluster,
+        mapseq_lsu_dbs.tax,
+        params.databases.silva_lsu.variables.label
     )
+    
+    // // MAPSEQ SSU
+    // if (CMSEARCH_SUBWF.out.cmsearch_ssu_fasta) {
+    //     if (params.ssu_db) {
+    //         mapseq_ssu = Channel.fromPath("${params.ssu_db}")
+    //     }
+    //     else {
+    //         DOWNLOAD_MAPSEQ_SSU()
+    //         mapseq_ssu = DOWNLOAD_MAPSEQ_SSU.out.mapseq_db_ssu
+    //     }
+    //     MAPSEQ_OTU_KRONA_SSU(
+    //         CMSEARCH_SUBWF.out.cmsearch_ssu_fasta,
+    //         mapseq_ssu,
+    //         Channel.value(params.ssu_db_otu),
+    //         Channel.value(params.ssu_db_fasta),
+    //         Channel.value(params.ssu_db_tax),
+    //         Channel.value(params.ssu_label)
+    //     )
+    // }
+
+    // MULTIQC(
+    //     QC.out.fastp_json,
+    //     MOTUS.out.motus_log
+    // )
 }

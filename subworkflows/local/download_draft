@@ -20,7 +20,7 @@ workflow DOWNLOAD_DBS {
         }
         
         // mOTUs db
-        motus_db_folder = channel.fromPath("${params.motus_db_path}");
+        motus_db_folder = channel.fromPath("${params.databases}/${params.motus_db}");
         if !(motus_db_folder.exists()) {
             MOTUS_DOWNLOADDB();
             motus_db_folder = MOTUS_DOWNLOAD_DB.db;

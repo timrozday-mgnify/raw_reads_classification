@@ -47,7 +47,10 @@ def main():
             # Pull out the fields that we need
             line = line.strip()
             fields = line.split("\t")
-
+            
+            if len(fields)<14:
+                continue
+            
             if not fields[13]:
                 tax = "Unclassified"
             else:

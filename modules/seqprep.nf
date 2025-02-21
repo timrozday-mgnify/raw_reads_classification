@@ -7,13 +7,14 @@ process SEQPREP {
     publishDir "${params.outdir}/qc/seqprep", mode: 'copy'
 
     label 'seqprep'
-
+    tag "$name"
     container 'quay.io/biocontainers/seqprep:1.3.2--hed695b0_4'
 
     input:
         val name
         path reads
     output:
+        val name, emit: sample_name
         path "${name}_merged.fastq.gz", emit: overlapped_reads
         path "${name}_forward_unmerged.fastq.gz", emit: forward_unmapped_reads
         path "${name}_reverse_unmerged.fastq.gz", emit: reverse_unmerged_reads
@@ -40,15 +41,17 @@ process SEQPREP_REPORT {
     publishDir "${params.outdir}/qc/seqprep", mode: 'copy'
 
     container 'quay.io/biocontainers/seqprep:1.3.2--hed695b0_4'
-
+    tag "$sample_name"
     label 'seqprep_report'
 
     input:
+        val sample_name
         path forward_unmapped_reads
         path reverse_unmerged_reads
         path merged_reads
 
     output:
+        val sample_name, emit: sample_name
         path "seqprep_output_report.txt", emit: overlapped_report
 
     script:

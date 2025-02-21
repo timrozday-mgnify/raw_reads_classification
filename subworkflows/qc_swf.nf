@@ -12,73 +12,85 @@ include { SEQTK as FASTQ_TO_FASTA} from '../modules/seqtk'
 include { QC_STATS } from '../modules/qc_summary'
 
 workflow QC {
-
     take:
-        name
-        reads
-        mode
-        ref_genome
-        ref_genome_name
+        sample
+        ref_genome_dir
+    
     main:
-        // We sort the reads by name.. to ensure
-        // pair end reads land in the correct position
-        // _1 -> forward first
-        // _2 -> reverse second
-        reads_list = reads.collect(sort: {
-            it.name
-        })
-
+        
         FASTP(
-            name,
-            reads_list,
-            mode,
-            channel.value("")
+            sample.map{ it.meta.id },
+            sample.map{ it.reads.reads },
+            sample.map{ it.mode },
+            Channel.value("")
         )
+       
+        decontam_ch = FASTP.out.sample_name.merge(FASTP.out.output_reads).map{ tuple(it[0],it[1..-1]) }.join(sample.map{tuple(it.meta.id, it)})
+        // decontam_ch.view{ "decontam_ch - ${it}" }
 
         DECONTAMINATION(
-            FASTP.out.output_reads,
-            ref_genome,
-            ref_genome_name,
-            mode,
-            name
+            decontam_ch.map{ it[1] },
+            ref_genome_dir,
+            decontam_ch.map{ it[2].mode },
+            decontam_ch.map{ it[0] },
         )
+        
+        decontam_reads_ch = DECONTAMINATION.out.sample_name.merge(DECONTAMINATION.out.decontaminated_reads).map{ tuple(it[0],it[1..-1]) }.join(sample.map{tuple(it.meta.id, it)})
+        // decontam_reads_ch.view{ "decontam_reads_ch - ${it}" }
+
         DECONTAMINATION_REPORT(
-            mode,
-            DECONTAMINATION.out.decontaminated_reads
+            decontam_reads_ch.map{ it[0] },
+            decontam_reads_ch.map{ it[2].mode },
+            decontam_reads_ch.map{ it[1] }
         )
 
-        if ( params.mode == "paired" ) {
-            SEQPREP(
-                name,
-                DECONTAMINATION.out.decontaminated_reads
-            )
-            SEQPREP_REPORT(
-                SEQPREP.out.forward_unmapped_reads,
-                SEQPREP.out.reverse_unmerged_reads,
-                SEQPREP.out.overlapped_reads
-            )
-            overlapped_reads = SEQPREP.out.overlapped_reads
-            overlapped_counts = SEQPREP_REPORT.out.overlapped_report
-        } else {
-            overlapped_reads = DECONTAMINATION.out.decontaminated_reads
-            overlapped_counts = channel.fromPath("NO_FILE")
+        // branch here
+        seqrep_ch = decontam_reads_ch.branch{ 
+            paired: it[2].mode=='paired'
+            single: it[2].mode=='single'
         }
-
-        QC_REPORT(
-            mode,
-            FASTP.out.json,
-            DECONTAMINATION_REPORT.out.decontamination_report,
-            overlapped_counts,
+        
+        SEQPREP(
+            seqrep_ch.paired.map{ it[0] },
+            seqrep_ch.paired.map{ it[1] }
+        )
+        SEQPREP_REPORT(
+            SEQPREP.out.sample_name,
+            SEQPREP.out.forward_unmapped_reads,
+            SEQPREP.out.reverse_unmerged_reads,
+            SEQPREP.out.overlapped_reads
         )
 
-        FASTQ_TO_FASTA(name, overlapped_reads)
+        paired_overlapped_reads_ch = SEQPREP.out.sample_name.merge(SEQPREP.out.overlapped_reads).map{ tuple(it[0],it[1..-1]) }
+        paired_overlapped_counts_ch = SEQPREP_REPORT.out.sample_name.merge(SEQPREP_REPORT.out.overlapped_report)
+        single_overlapped_reads_ch = seqrep_ch.single.map{ tuple(it[0],it[1]) }
+        single_overlapped_counts_ch = seqrep_ch.single.map{ it[0] }.merge(Channel.fromPath("NO_FILE"))
+        overlapped_counts = paired_overlapped_counts_ch.mix(single_overlapped_counts_ch)
+        overlapped_reads = paired_overlapped_reads_ch.mix(single_overlapped_reads_ch)
 
-        QC_STATS(FASTQ_TO_FASTA.out.sequence)
+        fastp_report_ch = FASTP.out.sample_name.merge(FASTP.out.json)
+        decontam_report_ch = DECONTAMINATION_REPORT.out.sample_name.merge(DECONTAMINATION_REPORT.out.decontamination_report)
+        report_ch = overlapped_counts.join(fastp_report_ch).join(decontam_report_ch).join(sample.map{tuple(it.meta.id, it)})
+        
+        QC_REPORT(
+            report_ch.map{ it[0] },
+            report_ch.map{ it[4].mode },
+            report_ch.map{ it[2] },
+            report_ch.map{ it[3] },
+            report_ch.map{ it[1] }
+        )
+
+        FASTQ_TO_FASTA(
+            overlapped_reads.map{ it[0] },
+            overlapped_reads.map{ it[1] }
+        )
+        sequence_ch = FASTQ_TO_FASTA.out.sample_name.merge(FASTQ_TO_FASTA.out.sequence)
+        QC_STATS(sequence_ch.map{ it[0] }, sequence_ch.map{ it[1] })
 
     emit:
         merged_reads = overlapped_reads
-        sequence = FASTQ_TO_FASTA.out.sequence
-        qc_report = QC_REPORT.out.qc_report
-        qc_stats = QC_STATS.out.qc_statistics
-        fastp_json = FASTP.out.json
+        sequence = sequence_ch 
+        qc_report = QC_REPORT.out.sample_name.merge(QC_REPORT.out.qc_report)
+        qc_stats = QC_STATS.out.sample_name.merge(QC_STATS.out.qc_statistics)
+        fastp_json = fastp_report_ch
 }

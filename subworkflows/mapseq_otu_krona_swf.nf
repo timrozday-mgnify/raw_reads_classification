@@ -8,35 +8,43 @@ include { KRONA } from '../modules/krona'
 
 workflow MAPSEQ_OTU_KRONA {
     take:
+        sample_name
         sequence
-        mapseq_db
         otu_ref
         db_fasta
+        db_mscluster
         db_tax
-        otu_label
+        db_label
+
     main:
 
         MAPSEQ(
+            sample_name,
             sequence,
-            mapseq_db,
             db_fasta,
+            db_mscluster,
             db_tax,
-            otu_label
+            db_label
         )
 
         MAPSEQ2BIOM(
+            MAPSEQ.out.sample_name,
             MAPSEQ.out.mapseq_result,
-            mapseq_db,
             otu_ref,
-            otu_label
+            db_label
         )
-
+        
         KRONA(
-            otu_label,
+            MAPSEQ2BIOM.out.sample_name,
+            db_label,
             MAPSEQ2BIOM.out.mapseq2biom_txt
         )
+        
+        output_ch = MAPSEQ.out.sample_name.merge(MAPSEQ.out.mapseq_result).join(MAPSEQ2BIOM.out.sample_name.merge(MAPSEQ2BIOM.out.mapseq2biom_txt))
+        
     emit:
-        mapseq = MAPSEQ.out.mapseq_result
-        biom = MAPSEQ2BIOM.out.mapseq2biom_txt
+        sample_name = output_ch.map{ it[0] }
+        mapseq = output_ch.map{ it[1] }
+        biom = output_ch.map{ it[2] }
 }
 

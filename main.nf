@@ -2,8 +2,8 @@
 
 nextflow.enable.dsl = 2
 
-include { MOTUS_PIPELINE } from './workflow/motus_pipeline.nf'
+include { PIPELINE } from './workflow/pipeline.nf'
 
 workflow {
-    MOTUS_PIPELINE ()
+    PIPELINE ()
 }

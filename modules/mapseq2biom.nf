@@ -5,21 +5,24 @@
 process MAPSEQ2BIOM {
 
     publishDir(
-        path: "${params.outdir}/taxonomy/${otu_label}",
+        path: "${params.outdir}/taxonomy/${sample_name}/${otu_label}",
         pattern: "${mapseq.baseName}.*",
         mode: 'copy'
     )
 
-    container 'quay.io/biocontainers/python:3.9--1'
+    container 'quay.io/biocontainers/python:3.11'
 
     label 'mapseq2biom'
-
+    tag "${sample_name}"
+    
     input:
+        val sample_name
         path mapseq
-        path mapseq_db
-        val otu_ref
+        path otu_ref
         val otu_label
+    
     output:
+        val sample_name, emit: sample_name
         path "${mapseq.baseName}.tsv", emit: mapseq2biom_tsv
         path "${mapseq.baseName}.txt", emit: mapseq2biom_txt
         path "${mapseq.baseName}.notaxid.tsv", emit: mapseq2biom_notaxid
@@ -33,6 +36,6 @@ process MAPSEQ2BIOM {
         --taxid \
         --label ${otu_label} \
         --query ${mapseq} \
-        --otu-table ${mapseq_db}/${otu_ref}
+        --otu-table ${otu_ref}
     """
 }
