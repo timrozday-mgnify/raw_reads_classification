@@ -1,29 +1,89 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema",
-  "$id": "https://raw.githubusercontent.com/ebi-metagenomics/motus_pipeline/restructure/assets/schema_input.json",
-  "title": "ebi-metagenomics/motus_pipeline - params.input schema",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ebi-metagenomics/motus_pipeline/master/assets/schema_input.json",
+  "title": "ebi-metagenomics/motus_pipeline pipeline - params.input schema",
   "description": "Schema for the file provided with params.input",
   "type": "array",
   "items": {
     "type": "object",
     "properties": {
-      "id": {
+      "sample": {
         "type": "string",
-        "pattern": "[EDS]RR[0-9]{6,}",
-        "errorMessage": "Prefix, used for the file names (raw reads accession)",
+        "pattern": "^\\S+$",
+        "errorMessage": "Sample name must be provided and cannot contain spaces",
         "meta": ["id"]
       },
       "fastq_1": {
         "type": "string",
-        "pattern": "^\\S+\\.(fastq|fq|fq.gz|fastq.gz)$",
-        "errorMessage": "The raw reads file needs to be a fastq file."
+        "pattern": "^\\S+\\.f(ast)?q\\.gz$",
+        "errorMessage": "FastQ file for reads 1 must be provided, cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'"
       },
       "fastq_2": {
-        "type": "string",
-        "pattern": "^\\S+\\.(fastq|fq|fq.gz|fastq.gz)$",
-        "errorMessage": "The raw reads file needs to be a fastq file."
+        "errorMessage": "FastQ file for reads 2 cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'",
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^\\S+\\.f(ast)?q\\.gz$"
+          },
+          {
+            "type": "string",
+            "maxLength": 0
+          }
+        ]
+      },
+      "fastq_barcode": {
+        "errorMessage": "FastQ file for barcodes cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'",
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^\\S+\\.f(ast)?q\\.gz$"
+          },
+          {
+            "type": "string",
+            "maxLength": 0
+          }
+        ]
+      },
+      "fastq_1_md5": {
+        "errorMessage": "MD5 hash string must be 32 characters (16 hexadecimal characters)",
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{32}$"
+          },
+          {
+            "type": "string",
+            "maxLength": 0
+          }
+        ]
+      },
+      "fastq_2_md5": {
+        "errorMessage": "MD5 hash string must be 32 characters (16 hexadecimal characters)",
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{32}$"
+          },
+          {
+            "type": "string",
+            "maxLength": 0
+          }
+        ]
+      },
+      "fastq_barcode_md5": {
+        "errorMessage": "MD5 hash string must be 32 characters (16 hexadecimal characters)",
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{32}$"
+          },
+          {
+            "type": "string",
+            "maxLength": 0
+          }
+        ]
       }
     },
-    "required": ["id", "fastq_1"]
+    "required": ["sample", "fastq_1"]
   }
 }
