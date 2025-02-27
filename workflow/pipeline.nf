@@ -134,8 +134,5 @@ workflow PIPELINE {
     mapseq_in.view{ "mapseq_in - ${it}" }
     MAPSEQ_OTU_KRONA(mapseq_in)
     
-    // MULTIQC(
-    //     QC.out.fastp_json,
-    //     MOTUS.out.motus_log
-    // )
+    MULTIQC(QC.out.fastp_json.join(MOTUS.out.map{ [it[0],it[3]] }))
 }

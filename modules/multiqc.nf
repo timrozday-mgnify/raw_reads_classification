@@ -1,16 +1,14 @@
 process MULTIQC {
 
     publishDir "${params.outdir}/qc/multiqc", mode: 'copy'
-    tag "${sample_name}"
+    tag "${meta.id}"
     container 'quay.io/biocontainers/multiqc:1.14--pyhdfd78af_0'
 
     input:
-    tuple val(sample_name), path(fastp_json)
-    path motus_log, name: "motus.log"
+    tuple val(meta), path(fastp_json), path(motus_log)
 
     output:
-    path "multiqc_report.html", emit: multiqc_report
-    path "multiqc_data", emit: multiqc_data
+    tuple val(meta), path("multiqc_report.html"), path("multiqc_data")
 
     script:
     """
