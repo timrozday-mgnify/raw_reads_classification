@@ -40,22 +40,22 @@ workflow PIPELINE {
     samplesheet.each{
         meta, fq1, fq2, fqb, fq1_md5, fq2_md5, fqb_md5 -> 
         if(fq1) {
-            sample2fp_list.add([meta.id,fq1,fq1_md5,'reads'])
+            sample2fp_list.add([meta,fq1,fq1_md5,'reads'])
         }
         if(fq2) {
-            sample2fp_list.add([meta.id,fq2,fq2_md5,'reads'])
+            sample2fp_list.add([meta,fq2,fq2_md5,'reads'])
         }
         if(fqb) {
-            sample2fp_list.add([meta.id,fqb,fqb_md5,'barcodes'])
+            sample2fp_list.add([meta,fqb,fqb_md5,'barcodes'])
         }
     }
     sizes = [:]
     sample2fp_list.each{
-        sample_name, fp, md5, t ->
-        if(sizes[sample_name]) {
-            sizes[sample_name] += 1
+        meta, fp, md5, t ->
+        if(sizes[meta.id]) {
+            sizes[meta.id] += 1
         }else{
-            sizes[sample_name] = 1
+            sizes[meta.id] = 1
         }
     }
 
@@ -63,101 +63,77 @@ workflow PIPELINE {
     // fetch_ch.view{ "fetch_ch - ${it}"}
     FETCH_READS(fetch_ch)
     // FETCH_READS.out.view{ "FETCH_READS.out - ${it}" }
-    
-     qc_ch = FETCH_READS.out.map{ k,fp,t -> tuple(groupKey(k,sizes[k]),tuple(fp,t))}.groupTuple() 
-     qc_ch = qc_ch.map{ k,fps -> 
-         def fps_d = [:]
-        fps.sort().each{ fp,t -> 
+     
+    qc_ch = FETCH_READS.out.map{ 
+        meta,fp,t -> 
+        [groupKey(meta,sizes[meta.id]),[fp,t]] 
+    }.groupTuple() 
+    qc_ch = qc_ch.map{ 
+        meta,fps -> 
+        def fps_d = [:]
+        fps.sort{ a,b -> a[0] <=> b[0] }.each{ fp,t -> 
             if(fps_d[t]) {
                 fps_d[t].add(fp)
             }else{
                 fps_d[t] = [fp]
             }
         }
-        return tuple(k,fps_d)
+        return [meta,fps_d]
     }
-    qc_ch = qc_ch.filter{ (it[1].reads) && (it[1].reads.size()>0)}.map{ k,fps -> ['meta': ['id': k],'reads': fps,'mode': fps.reads.size()>1 ? 'paired':'single'] }
+    qc_ch = qc_ch.filter{ 
+        meta,fps -> 
+        (fps.reads) && (fps.reads.size()>0)
+    }.map{ 
+        meta,fps -> 
+        [meta, [reads: fps.reads, 
+                mode: fps.reads.size()>1 ? 'paired':'single']]
+    }
     // qc_ch.view{ "qc_ch - ${it}" }
 
     DOWNLOAD_HOST_REFERENCE_GENOME()
-    ref_genome_dir = DOWNLOAD_HOST_REFERENCE_GENOME.out.ref_genome_dir
-    // ref_genome_dir.view{ "ref_genome_dir - ${it}"}
+    host_genome_db = DOWNLOAD_HOST_REFERENCE_GENOME.out.host_genome_db
+    // host_genome_db.view{ "host_genome_db - ${it}"}
 
     QC(
         qc_ch,
-        ref_genome_dir,
+        host_genome_db,
     )
-    // QC.out.merged_reads.view{ "QC.out.merged_reads - ${it}" }
+    QC.out.merged_reads.view{ "QC.out.merged_reads - ${it}" }
 
-     // mOTUs
+
+    // mOTUs
     DOWNLOAD_MOTUS_DB()
-    motus_db_dir = DOWNLOAD_MOTUS_DB.out.motus_db
-    // motus_db_dir.view{ "motus_db_dir - ${it}" }
+    motus_db = DOWNLOAD_MOTUS_DB.out
+    motus_db.view{ "motus_db - ${it}" }
 
-    MOTUS(QC.out.merged_reads, motus_db_dir)
-    // MOTUS.out.motus_result_cleaned.view{ "MOTUS.out.motus_result_cleaned - ${it}" }
+    MOTUS(QC.out.merged_reads, motus_db)
+    MOTUS.out.view{ "MOTUS.out - ${it}" }
     
+    
+    // cmsearch 
     DOWNLOAD_RFAM()
-    rfam_db_dir = DOWNLOAD_RFAM.out.rfam_db_dir
-    rfam_dbs = rfam_db_dir.multiMap{ it ->
-        ribo_models: file("${it}/${params.databases.rfam.files.ribosomal_models_file}")
-        other_models: file("${it}/${params.databases.rfam.files.other_models_file}")
-        ribo_claninfo: file("${it}/${params.databases.rfam.files.ribosomal_claninfo_file}")
-        other_claninfo: file("${it}/${params.databases.rfam.files.other_claninfo_file}")
-    }
-    // rfam_dbs.ribo_models.view{ "rfam_dbs.ribo_models - ${it}" }
-    // rfam_dbs.other_models.view{ "rfam_dbs.other_models - ${it}" }
-    // rfam_dbs.ribo_claninfo.view{ "rfam_dbs.ribo_claninfo - ${it}" }
-    // rfam_dbs.other_claninfo.view{ "rfam_dbs.other_claninfo - ${it}" }
+    rfam_dbs = DOWNLOAD_RFAM.out.rfam_db_dir
 
-    // CMSEARCH
-    CMSEARCH_SUBWF(
-        QC.out.sequence.map{ it[0] },
-        QC.out.sequence.map{ it[1] },
-        rfam_dbs.ribo_models,
-        rfam_dbs.ribo_claninfo
-    )
+    CMSEARCH_SUBWF(QC.out.sequence, rfam_dbs)
     
+     
+    // mapseq with silva ssu and lsu
     DOWNLOAD_MAPSEQ_LSU()
     mapseq_lsu_db_dir = DOWNLOAD_MAPSEQ_LSU.out.mapseq_lsu_db_dir
-    // mapseq_lsu_db_dir.view{ "mapseq_lsu_db_dir - ${it}" }
+    mapseq_lsu_db_dir.view{ "mapseq_lsu_db_dir - ${it}" }
     
-    mapseq_lsu_dbs = mapseq_lsu_db_dir.multiMap{ it ->
-        otu: file("${it}/${params.databases.silva_lsu.files.otu}")
-        fasta: file("${it}/${params.databases.silva_lsu.files.fasta}")
-        tax: file("${it}/${params.databases.silva_lsu.files.tax}")
-        mscluster: file("${it}/${params.databases.silva_lsu.files.mscluster}")
-    }
-
-    MAPSEQ_OTU_KRONA(
-        CMSEARCH_SUBWF.out.sample_name,
-        CMSEARCH_SUBWF.out.cmsearch_lsu_fasta,
-        mapseq_lsu_dbs.otu,
-        mapseq_lsu_dbs.fasta,
-        mapseq_lsu_dbs.mscluster,
-        mapseq_lsu_dbs.tax,
-        params.databases.silva_lsu.variables.label
-    )
+    DOWNLOAD_MAPSEQ_SSU()
+    mapseq_ssu_db_dir = DOWNLOAD_MAPSEQ_SSU.out.mapseq_ssu_db_dir
+    mapseq_ssu_db_dir.view{ "mapseq_ssu_db_dir - ${it}" }
     
-    // // MAPSEQ SSU
-    // if (CMSEARCH_SUBWF.out.cmsearch_ssu_fasta) {
-    //     if (params.ssu_db) {
-    //         mapseq_ssu = Channel.fromPath("${params.ssu_db}")
-    //     }
-    //     else {
-    //         DOWNLOAD_MAPSEQ_SSU()
-    //         mapseq_ssu = DOWNLOAD_MAPSEQ_SSU.out.mapseq_db_ssu
-    //     }
-    //     MAPSEQ_OTU_KRONA_SSU(
-    //         CMSEARCH_SUBWF.out.cmsearch_ssu_fasta,
-    //         mapseq_ssu,
-    //         Channel.value(params.ssu_db_otu),
-    //         Channel.value(params.ssu_db_fasta),
-    //         Channel.value(params.ssu_db_tax),
-    //         Channel.value(params.ssu_label)
-    //     )
-    // }
-
+    lsu_ch = CMSEARCH_SUBWF.out.cmsearch_lsu_fasta.combine(mapseq_lsu_db_dir)
+    ssu_ch = CMSEARCH_SUBWF.out.cmsearch_ssu_fasta.combine(mapseq_ssu_db_dir)
+    mapseq_in = lsu_ch.mix(ssu_ch)
+    mapseq_in = mapseq_in.map{ meta_seq,seq,meta_db,db ->
+        [[seq_id: meta_seq.id, db_id: meta_db.id], seq, db] }
+    mapseq_in.view{ "mapseq_in - ${it}" }
+    MAPSEQ_OTU_KRONA(mapseq_in)
+    
     // MULTIQC(
     //     QC.out.fastp_json,
     //     MOTUS.out.motus_log

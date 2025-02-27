@@ -7,20 +7,15 @@ process FASTP {
 
     container 'quay.io/biocontainers/fastp:0.23.1--h79da9fb_0'
     label 'fastp'
-    tag "$sample_name"
+    tag "$meta.id"
 
     input:
-    val sample_name
-    file reads_list
-    val mode
-    val merged_reads
+    tuple val(meta), val(fps)
+    tuple val(merged_meta), val(merged_reads)
 
     output:
-    val sample_name, emit: sample_name
-    path "${sample_name}_fastp*.fastq.gz", optional: true, emit: output_reads
-    path "*_fastp.json", emit: json
-    path "*_fastp.html", emit: html
-    path "*_merged*", optional: true, emit: overlapped_reads
+    tuple val(meta), path("${meta.id}_fastp*.fastq.gz"), path("*_fastp.json"), path("*_fastp.html"), emit: reads
+    tuple val(merged_meta), path("*_merged*"), optional: true, emit: merged
 
     script:
     /* Handle the input reads */
@@ -28,22 +23,22 @@ process FASTP {
     def output_reads = "";
     def report_name = "qc";
 
-    if ( mode == "single" ) {
-        input_reads = "--in1 ${reads_list}";
-        output_reads = "--out1 ${sample_name}_fastp.fastq.gz";
+    if ( fps.mode == "single" ) {
+        input_reads = "--in1 ${fps.reads}";
+        output_reads = "--out1 ${meta.id}_fastp.fastq.gz";
     }
 
-    if ( mode == "paired" ) {
-        input_reads = "--in1 ${reads_list[0]} --in2 ${reads_list[1]} --detect_adapter_for_pe";
-        output_reads = "--out1 ${sample_name}_fastp_1.fastq.gz --out2 ${sample_name}_fastp_2.fastq.gz";
+    if ( fps.mode == "paired" ) {
+        input_reads = "--in1 ${fps.reads[0]} --in2 ${fps.reads[1]} --detect_adapter_for_pe";
+        output_reads = "--out1 ${meta.id}_fastp_1.fastq.gz --out2 ${meta.id}_fastp_2.fastq.gz";
     }
 
     /* Optional parameters */
     def args = ""
     if ( merged_reads ) {
-        args += " -m --merged_out ${sample_name}_${merged_reads}" +
-        " --unpaired1 ${sample_name}.unpaired_1.fastq.gz " +
-        " --unpaired2 ${sample_name}.unpaired_2.fastq.gz"
+        args += " -m --merged_out ${meta.id}_${merged_reads}" +
+        " --unpaired1 ${meta.id}.unpaired_1.fastq.gz " +
+        " --unpaired2 ${meta.id}.unpaired_2.fastq.gz"
         report_name = "overlap"
     }
     args += params.fastp_params.length_filter ? " -l ${params.fastp_params.length_filter}" : "";
@@ -55,8 +50,8 @@ process FASTP {
     fastp -w ${task.cpus} \
     ${input_reads} \
     ${output_reads} \
-    --json ${sample_name}_${report_name}_fastp.json \
-    --html ${sample_name}_${report_name}_fastp.html \
+    --json ${meta.id}_${report_name}_fastp.json \
+    --html ${meta.id}_${report_name}_fastp.html \
     ${args}
     """
 }

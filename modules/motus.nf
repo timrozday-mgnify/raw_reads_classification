@@ -10,18 +10,15 @@ process MOTUS {
     publishDir "${params.outdir}/mOTUs/", mode: 'copy'
 
     label 'motus'
-    tag "${sample_name}"
+    tag "${meta.id}"
     container 'quay.io/biocontainers/motus:3.0.3--pyhdfd78af_0'
 
     input:
-    tuple val(sample_name), path(reads)
-    path motus_db
+    tuple val(meta), path(reads)
+    tuple val(db_meta), val(motus_db)
 
     output:
-    val sample_name, emit: sample_name
-    path "*.motus", emit: motus_result
-    path "*.tsv", emit: motus_result_cleaned
-    path "${reads.simpleName}_motus.log", emit: motus_log
+    tuple val(meta), path("*.motus"), path("*.tsv"), path("${reads.simpleName}_motus.log") 
 
     script:
     """
@@ -57,10 +54,11 @@ process MOTUS_DOWNLOAD_DB {
     
     label 'motus_download'
     container "quay.io/biocontainers/motus:3.0.3--pyhdfd78af_0"
-
+    tag "${params.databases.motus.name}"
+    
     output:
-        path "db_mOTU", emit: db_dir
-        path "db_mOTU/*", emit: db
+        tuple val([id: params.databases.motus.name]), path("db_mOTU"), emit: db
+        // path "db_mOTU/*", emit: db
 
     script:
     """

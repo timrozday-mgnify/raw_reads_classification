@@ -5,37 +5,33 @@
 process MAPSEQ2BIOM {
 
     publishDir(
-        path: "${params.outdir}/taxonomy/${sample_name}/${otu_label}",
-        pattern: "${mapseq.baseName}.*",
+        path: "${params.outdir}/taxonomy/${meta.seq_id}/${otu_label}",
+        pattern: "${mapseq_out.baseName}.*",
         mode: 'copy'
     )
 
     container 'quay.io/biocontainers/python:3.11'
 
     label 'mapseq2biom'
-    tag "${sample_name}"
+    tag "${meta.seq_id}"
     
     input:
-        val sample_name
-        path mapseq
-        path otu_ref
-        val otu_label
+        tuple val(meta), path(mapseq_out), val(sequence), val(db_dir)
     
     output:
-        val sample_name, emit: sample_name
-        path "${mapseq.baseName}.tsv", emit: mapseq2biom_tsv
-        path "${mapseq.baseName}.txt", emit: mapseq2biom_txt
-        path "${mapseq.baseName}.notaxid.tsv", emit: mapseq2biom_notaxid
+        tuple val(meta), path("${mapseq_out.baseName}.tsv"), path("${mapseq_out.baseName}.txt"), path("${mapseq_out.baseName}.notaxid.tsv")
 
     script:
+    otu_label = meta.db_id
+    otu_ref = "${db_dir}/${params.databases[meta.db_id].files.otu}"
     """
     mapseq2biom.py \
-        --out-file ${mapseq.baseName}.tsv \
-        --krona ${mapseq.baseName}.txt \
-        --no-tax-id-file ${mapseq.baseName}.notaxid.tsv \
+        --out-file ${mapseq_out.baseName}.tsv \
+        --krona ${mapseq_out.baseName}.txt \
+        --no-tax-id-file ${mapseq_out.baseName}.notaxid.tsv \
         --taxid \
         --label ${otu_label} \
-        --query ${mapseq} \
+        --query ${mapseq_out} \
         --otu-table ${otu_ref}
     """
 }

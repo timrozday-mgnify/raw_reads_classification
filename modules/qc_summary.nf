@@ -8,15 +8,13 @@ process QC_STATS {
     container 'quay.io/biocontainers/biopython:1.75'
 
     label 'qc_summary'
-    tag "${sample_name}"
+    tag "${meta.id}"
 
     input:
-    val sample_name
-    path sequence
+    tuple val(meta), path(sequence)
 
     output:
-    val sample_name, emit: sample_name
-    path "statistics", emit: qc_statistics
+    tuple val(meta), path("statistics")
 
     script:
     """

@@ -6,24 +6,19 @@ process QC_REPORT {
     publishDir "${params.outdir}/qc", mode: 'copy'
 
     container 'quay.io/biocontainers/python:3.11'
-    tag "$sample_name"
+    tag "${meta.id}"
     label 'report'
 
     input:
-    val sample_name
-    val mode
-    path filtering_fastp_json
-    path decontamination_counts
-    path seqprep_counts
+    tuple val(meta), val(reports)
 
     output:
-    val sample_name, emit: sample_name
-    path "qc_summary", emit: qc_report
+    tuple val(meta), path("qc_summary")
 
     script:
     def inputs = ""
-    if (mode == "paired") {
-        inputs = " --overlap-counts ${seqprep_counts}" 
+    if (reports.samples.mode == "paired") {
+        inputs = " --overlap-counts ${reports.merged}" 
     }
     else {
         inputs = ""
@@ -31,8 +26,8 @@ process QC_REPORT {
 
     """
     collect_counts.py \
-    --qc-json ${filtering_fastp_json} \
-    --decontamination-counts ${decontamination_counts} \
+    --qc-json ${reports.fastp} \
+    --decontamination-counts ${reports.decontam} \
     ${inputs} -o "qc_summary"
     """
 }

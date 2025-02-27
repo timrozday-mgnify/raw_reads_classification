@@ -1,5 +1,5 @@
 process FETCH_URL {
-    tag "$sample_name"
+    tag "$meta.id"
 
     label 'process_single'
     container 'quay.io/biocontainers/gnu-wget:1.18--hb829ee6_10'
@@ -8,10 +8,10 @@ process FETCH_URL {
     errorStrategy 'retry'
 
     input:
-    tuple val(sample_name), val(url), val(md5), val(read_type)
+    tuple val(meta), val(url), val(md5), val(read_type)
 
     output:
-    tuple val(sample_name), path("${sample_name}/${fn}"), val(read_type)
+    tuple val(meta), path("${meta.id}/${fn}"), val(read_type)
 
     script:
     fn = url.tokenize('/').last()
@@ -24,9 +24,9 @@ process FETCH_URL {
     //                    """
     // }
     """
-    mkdir -p ${sample_name}
-    wget ${url} -O ${sample_name}/${fn}
-    # dl_md5="\$(cat $sample_name/$fn | md5sum | awk '{print \$1}')"
+    mkdir -p ${meta.id}
+    wget ${url} -O ${meta.id}/${fn}
+    # dl_md5="\$(cat $meta.id/$fn | md5sum | awk '{print \$1}')"
     ${checksum_cmd}
     """
 }

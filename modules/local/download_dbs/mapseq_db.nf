@@ -10,12 +10,10 @@ process GET_MAPSEQ_DB {
     errorStrategy 'retry'
 
     input:
-    val(db_name)
-    val(remote_path)
-    val(md5_path)
+    tuple val(meta), val(remote_path), val(md5_path)
 
     output:
-    path "${db_name}", emit: db_dir
+    tuple val(meta), path("${meta.name}"), emit: db_dir
 
     script:
     fn = remote_path.tokenize('/').last()

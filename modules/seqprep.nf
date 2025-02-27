@@ -7,31 +7,28 @@ process SEQPREP {
     publishDir "${params.outdir}/qc/seqprep", mode: 'copy'
 
     label 'seqprep'
-    tag "$name"
+    tag "${meta.id}"
     container 'quay.io/biocontainers/seqprep:1.3.2--hed695b0_4'
 
     input:
-        val name
-        path reads
+        tuple val(meta), val(decontam_reads), val(sample_d)
+
     output:
-        val name, emit: sample_name
-        path "${name}_merged.fastq.gz", emit: overlapped_reads
-        path "${name}_forward_unmerged.fastq.gz", emit: forward_unmapped_reads
-        path "${name}_reverse_unmerged.fastq.gz", emit: reverse_unmerged_reads
+        tuple val(meta), path("${meta.id}_merged.fastq.gz"), path("${meta.id}_forward_unmerged.fastq.gz"), path("${meta.id}_reverse_unmerged.fastq.gz")
 
     script:
     def input_reads = "";
-    if (reads[0].name.contains("_1")) {
-        input_reads = "-f ${reads[0]} -r ${reads[1]}"
+    if (decontam_reads[0].name.contains("_1")) {
+        input_reads = "-f ${decontam_reads[0]} -r ${decontam_reads[1]}"
     } else {
-        input_reads = "-f ${reads[1]} -r ${reads[0]}"
+        input_reads = "-f ${decontam_reads[1]} -r ${decontam_reads[0]}"
     }
     """
     SeqPrep \
     ${input_reads} \
-    -1 ${name}_forward_unmerged.fastq.gz \
-    -2 ${name}_reverse_unmerged.fastq.gz \
-    -s ${name}_merged.fastq.gz
+    -1 ${meta.id}_forward_unmerged.fastq.gz \
+    -2 ${meta.id}_reverse_unmerged.fastq.gz \
+    -s ${meta.id}_merged.fastq.gz
 
     """
 }
@@ -41,23 +38,19 @@ process SEQPREP_REPORT {
     publishDir "${params.outdir}/qc/seqprep", mode: 'copy'
 
     container 'quay.io/biocontainers/seqprep:1.3.2--hed695b0_4'
-    tag "$sample_name"
+    tag "${meta.id}"
     label 'seqprep_report'
 
     input:
-        val sample_name
-        path forward_unmapped_reads
-        path reverse_unmerged_reads
-        path merged_reads
-
+        tuple val(meta), val(reads)
+    
     output:
-        val sample_name, emit: sample_name
-        path "seqprep_output_report.txt", emit: overlapped_report
+        tuple val(meta), path("seqprep_output_report.txt")
 
     script:
     """
-    zcat ${forward_unmapped_reads} | grep '@' | wc -l > seqprep_output_report.txt
-    zcat ${reverse_unmerged_reads} | grep '@' | wc -l >> seqprep_output_report.txt
-    zcat ${merged_reads} | grep '@' | wc -l >> seqprep_output_report.txt
+    zcat ${reads.forward_unmapped} | grep '@' | wc -l > seqprep_output_report.txt
+    zcat ${reads.reverse_unmerged} | grep '@' | wc -l >> seqprep_output_report.txt
+    zcat ${reads.merged} | grep '@' | wc -l >> seqprep_output_report.txt
     """
 }

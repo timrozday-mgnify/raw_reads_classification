@@ -7,8 +7,7 @@ include { CMSEARCH_DEOVERLAP } from '../modules/cmsearch_deoverlap'
 include { EASEL_EXTRACT_BY_COORD } from '../modules/easel'
 include { EXTRACT_MODELS } from '../modules/extract_coords'
 
-/* FIXME: rename this - the current name doesn't reflect the modue functionatily */
-process RETURN_FILES {
+process COLLATE_FILES {
 
     publishDir(
         "${params.outdir}/cmsearch/",
@@ -16,63 +15,61 @@ process RETURN_FILES {
     )
 
     container 'quay.io/biocontainers/infernal:1.1.4--pl5321hec16e2b_1'
-    tag "${name}"
+    tag "${meta.id}"
     label 'process_single'
 
     stageInMode 'copy'
 
     input:
-    val name
-    file cmsearch
-    file deoverlap
+    tuple val(meta), file(cmsearch), file(deoverlap)
 
     output:
-    file "${name}_matched_seqs_with_coords.tbl"
-    file "${name}_matched_seqs_with_coords_deoverlap.tbl"
+    tuple val(meta), file("${meta.id}_matched_seqs_with_coords.tbl"), file("${meta.id}_matched_seqs_with_coords_deoverlap.tbl")
 
     script:
     """
-    head -n 1 ${cmsearch} > "${name}_matched_seqs_with_coords.tbl"
-    grep -v '^#' ${cmsearch} | grep . >> "${name}_matched_seqs_with_coords.tbl"
+    head -n 1 ${cmsearch} > "${meta.id}_matched_seqs_with_coords.tbl"
+    grep -v '^#' ${cmsearch} | grep . >> "${meta.id}_matched_seqs_with_coords.tbl"
 
-    head -n 1 ${cmsearch} > "${name}_matched_seqs_with_coords_deoverlap.tbl"
-    cat ${deoverlap} >> "${name}_matched_seqs_with_coords_deoverlap.tbl"
+    head -n 1 ${cmsearch} > "${meta.id}_matched_seqs_with_coords_deoverlap.tbl"
+    cat ${deoverlap} >> "${meta.id}_matched_seqs_with_coords_deoverlap.tbl"
     """
 }
 
 workflow CMSEARCH_SUBWF {
     take:
-        sample_name
         sequences
-        covariance_model_database
-        clan_information
+        rfam_dbs
     main:
-        // cat models
+        rfam_dbs_split = rfam_dbs.multiMap{ meta,d ->
+            def db_fps = params.databases.rfam.files
+            ribo_models: [meta, file("${d}/${db_fps.ribosomal_models_file}")]
+            other_models: [meta, file("${d}/${db_fps.other_models_file}")]
+            ribo_claninfo: [meta, file("${d}/${db_fps.ribosomal_claninfo_file}")]
+            other_claninfo: [meta, file("${d}/${db_fps.other_claninfo_file}")]
+        } 
+
+        // run
+        CMSEARCH(sequences, rfam_dbs_split.ribo_models)
+        CMSEARCH_DEOVERLAP(CMSEARCH.out, rfam_dbs_split.ribo_claninfo) 
         
-        CMSEARCH(sample_name, sequences, covariance_model_database)
+        // save outputs
+        CMSEARCH.out.collectFile(name: "cmsearch.tbl", newLine: true)
+        CMSEARCH_DEOVERLAP.out.collectFile(name: "deoverlapped.tbl")
 
-        CMSEARCH_DEOVERLAP(CMSEARCH.out.sample_name, clan_information, CMSEARCH.out.cmsearch)
-
-        // cat cmsearch
-        cmsearch_result = CMSEARCH.out.sample_name.merge(CMSEARCH.out.cmsearch)
-        cmsearch_result.collectFile(name: "cmsearch.tbl", newLine: true)
-
-        // cat deoverlapped
-        cmsearch_result_deoverlapped = CMSEARCH_DEOVERLAP.out.sample_name.merge(CMSEARCH_DEOVERLAP.out.cmsearch_deoverlap)
-        cmsearch_result_deoverlapped.collectFile(name: "deoverlapped.tbl")
-
-        easel_ch = sample_name.merge(sequences).join(cmsearch_result_deoverlapped)
-        EASEL_EXTRACT_BY_COORD(easel_ch.map{ it[0] }, easel_ch.map{ it[1] }, easel_ch.map{ it[2] })
-
-        extract_ch = EASEL_EXTRACT_BY_COORD.out.sample_name.merge(EASEL_EXTRACT_BY_COORD.out.models_fasta)
-        EXTRACT_MODELS(extract_ch.map{ it[0] }, extract_ch.map{ it[1] })
-
-        output_ch = cmsearch_result.join(cmsearch_result_deoverlapped) 
-
-        RETURN_FILES(output_ch.map{ it[0] }, output_ch.map{ it[1] }, output_ch.map{ it[2] })
+        EASEL_EXTRACT_BY_COORD(sequences.join(CMSEARCH_DEOVERLAP.out))
+        EXTRACT_MODELS(EASEL_EXTRACT_BY_COORD.out)
+        
+        extract_models_out = EXTRACT_MODELS.out.multiMap{ meta,a,b,c ->
+            directory: [meta, a]
+            ssu_fasta: [meta, b]
+            lsu_fasta: [meta, c]
+        }
+        
+        output_ch = CMSEARCH.out.join(CMSEARCH_DEOVERLAP.out) 
+        COLLATE_FILES(output_ch)
     emit:
-        sample_name = EXTRACT_MODELS.out.sample_name
-        cmsearch_lsu_fasta = EXTRACT_MODELS.out.lsu_fasta
-        cmsearch_ssu_fasta = EXTRACT_MODELS.out.ssu_fasta
-        seq_cat = EXTRACT_MODELS.out.seq_cat_folder
+        cmsearch_lsu_fasta = extract_models_out.lsu_fasta
+        cmsearch_ssu_fasta = extract_models_out.ssu_fasta
+        seq_cat = extract_models_out.directory
 }

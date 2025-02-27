@@ -7,21 +7,17 @@ process EXTRACT_MODELS {
     publishDir "${params.outdir}/cmsearch/", mode:'copy'
     
     label 'extract_coords'
-    tag "${name}"
+    tag "${meta.id}"
     container 'quay.io/biocontainers/biopython:1.75'
 
     input:
-    val name
-    path sequences
+    tuple val(meta), path(sequences) 
 
     output:
-    val name, emit: sample_name
-    path "sequence-categorisation/", emit: seq_cat_folder
-    path "sequence-categorisation/${name}_SSU.fasta", optional: true, emit: ssu_fasta
-    path "sequence-categorisation/${name}_LSU.fasta", optional: true, emit: lsu_fasta
+    tuple val(meta), path("sequence-categorisation/"), path("sequence-categorisation/${meta.id}_SSU.fasta"), path("sequence-categorisation/${meta.id}_LSU.fasta")
 
     script:
     """
-    get_subunits.py -i ${sequences} -n $name
+    get_subunits.py -i ${sequences} -n $meta.id
     """
 }

@@ -3,7 +3,7 @@
 */
 process GET_REFERENCE_GENOME {
 
-    tag "${fn}"
+    tag "${meta.id}"
     label 'process_single'
     container 'quay.io/biocontainers/gnu-wget:1.18--hb829ee6_10'
 
@@ -11,15 +11,14 @@ process GET_REFERENCE_GENOME {
     errorStrategy 'retry'
 
     input:
-    val(remote_path)
-    val(md5_path)
+    tuple val(meta), val(remote_path), val(md5_path)
 
     output:
-    path "${params.databases.host_genome.name}", emit: db
+    tuple val(meta), path("${params.databases.host_genome.name}")
 
     script:
-    fn = remote_path.tokenize('/').last()
-    checksum_cmd = ''
+    def fn = remote_path.tokenize('/').last()
+    def checksum_cmd = ''
     if(!md5_path=='') { 
         checksum_cmd = """
                        wget "${md5_path}" -O md5.2 

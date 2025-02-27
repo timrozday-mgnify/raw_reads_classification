@@ -7,16 +7,13 @@ process EASEL_EXTRACT_BY_COORD {
 
     container 'quay.io/biocontainers/easel:0.48--hec16e2b_1'
     label 'easel'
-    tag "${sample_name}"
+    tag "${meta.id}"
 
     input:
-        val sample_name
-        path sequences
-        path deoverlapped_coords
+        tuple val(meta), path(sequences), path(deoverlapped_coords)
 
     output:
-        val sample_name, emit: sample_name
-        path "${sequences.baseName}_${deoverlapped_coords.baseName}.fasta", emit: models_fasta
+        tuple val(meta), path("${sequences.baseName}_${deoverlapped_coords.baseName}.fasta")
 
     script:
     """

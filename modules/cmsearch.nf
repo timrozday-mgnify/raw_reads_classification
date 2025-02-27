@@ -5,17 +5,15 @@
 process CMSEARCH {
 
     label 'cmsearch'
-    tag "${sample_name}"
+    tag "${meta.id}"
     container 'quay.io/biocontainers/infernal:1.1.4--pl5321hec16e2b_1'
 
     input:
-    val sample_name
-    path sequences
-    each covariance_model_database
+    tuple val(meta), path(sequences)
+    tuple val(meta_db), val(covariance_model_database)
 
     output:
-    val sample_name, emit: sample_name
-    path "${sequences.baseName}*.cmsearch_matches.tbl", emit: cmsearch
+    tuple val(meta), path("${sequences.baseName}*.cmsearch_matches.tbl")
 
     script:
     """

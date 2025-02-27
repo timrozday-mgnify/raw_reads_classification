@@ -7,49 +7,46 @@ process DECONTAMINATION {
     
     container 'quay.io/microbiome-informatics/bwamem2:2.2.1'
     label 'decontamination'
-    tag "$sample_name"
+    tag "$meta.id"
 
     input:
-    path reads
-    path ref_genome_path
-    val mode
-    val sample_name
+    tuple val(meta), val(fastp_d), val(sample_d)
+    tuple val(db_meta), val(host_genome_db)
 
     output:
-    val sample_name,  emit: sample_name
-    path "*_clean*.fastq.gz", emit: decontaminated_reads
+    tuple val(meta), path("*_clean*.fastq.gz")
 
     script:
     def input_reads = "";
-    def bwa_index = "${ref_genome_path}/${params.databases.host_genome.files.bwa_index_prefix}"
-    if (mode == "single") {
-        input_reads = "${reads}";
+    def bwa_index = "${host_genome_db}/${params.databases.host_genome.files.bwa_index_prefix}"
+    if (sample_d.mode == "single") {
+        input_reads = "${fastp_d.fastq}";
         """
         mkdir -p output_decontamination
 
         echo "mapping files to host genome SE"
         bwa-mem2 mem -t ${task.cpus} \
         ${bwa_index} \
-        ${reads} > out.sam
+        ${input_reads} > out.sam
 
         echo "convert sam to bam"
-        samtools view -@ ${task.cpus} -f 4 -F 256 -uS -o output_decontamination/${sample_name}_unmapped.bam out.sam
+        samtools view -@ ${task.cpus} -f 4 -F 256 -uS -o output_decontamination/${meta.id}_unmapped.bam out.sam
 
         echo "samtools sort"
-        samtools sort -@ ${task.cpus} -n output_decontamination/${sample_name}_unmapped.bam \
-        -o output_decontamination/${sample_name}_unmapped_sorted.bam
+        samtools sort -@ ${task.cpus} -n output_decontamination/${meta.id}_unmapped.bam \
+        -o output_decontamination/${meta.id}_unmapped_sorted.bam
 
         echo "samtools"
-        samtools fastq output_decontamination/${sample_name}_unmapped_sorted.bam > output_decontamination/${sample_name}_clean.fastq
+        samtools fastq output_decontamination/${meta.id}_unmapped_sorted.bam > output_decontamination/${meta.id}_clean.fastq
 
         echo "compressing output file"
-        gzip -c output_decontamination/${sample_name}_clean.fastq > ${sample_name}_clean.fastq.gz
+        gzip -c output_decontamination/${meta.id}_clean.fastq > ${meta.id}_clean.fastq.gz
         """
-    } else if ( mode == "paired" ) {
-        if (reads[0].name.contains("_1")) {
-            input_reads = "${reads[0]} ${reads[1]}"
+    } else if ( sample_d.mode == "paired" ) {
+        if (fastp_d.fastq[0].name.contains("_1")) {
+            input_reads = "${fastp_d.fastq[0]} ${fastp_d.fastq[1]}"
         } else {
-            input_reads = "${reads[1]} ${reads[0]}"
+            input_reads = "${fastp_d.fastq[1]} ${fastp_d.fastq[0]}"
         }
         """
         mkdir output_decontamination
@@ -60,24 +57,24 @@ process DECONTAMINATION {
         ${input_reads} > out.sam
 
         echo "convert sam to bam"
-        samtools view -@ ${task.cpus} -f 12 -F 256 -uS -o output_decontamination/${sample_name}_both_unmapped.bam out.sam
+        samtools view -@ ${task.cpus} -f 12 -F 256 -uS -o output_decontamination/${meta.id}_both_unmapped.bam out.sam
 
         echo "samtools sort"
-        samtools sort -@ ${task.cpus} -n output_decontamination/${sample_name}_both_unmapped.bam -o output_decontamination/${sample_name}_both_unmapped_sorted.bam
+        samtools sort -@ ${task.cpus} -n output_decontamination/${meta.id}_both_unmapped.bam -o output_decontamination/${meta.id}_both_unmapped_sorted.bam
 
         echo "samtools fastq"
-        samtools fastq -1 output_decontamination/${sample_name}_clean_1.fastq \
-        -2 output_decontamination/${sample_name}_clean_2.fastq \
+        samtools fastq -1 output_decontamination/${meta.id}_clean_1.fastq \
+        -2 output_decontamination/${meta.id}_clean_2.fastq \
         -0 /dev/null \
         -s /dev/null \
-        -n output_decontamination/${sample_name}_both_unmapped_sorted.bam
+        -n output_decontamination/${meta.id}_both_unmapped_sorted.bam
 
         echo "compressing output files"
-        gzip -c output_decontamination/${sample_name}_clean_1.fastq > ${sample_name}_clean_1.fastq.gz
-        gzip -c output_decontamination/${sample_name}_clean_2.fastq > ${sample_name}_clean_2.fastq.gz
+        gzip -c output_decontamination/${meta.id}_clean_1.fastq > ${meta.id}_clean_1.fastq.gz
+        gzip -c output_decontamination/${meta.id}_clean_2.fastq > ${meta.id}_clean_2.fastq.gz
         """
     } else {
-        error "Invalid mode: ${mode}"
+        error "Invalid mode: ${sample_d.mode}"
     }
 }
 
@@ -90,22 +87,19 @@ process DECONTAMINATION_REPORT {
     publishDir "${params.outdir}/qc/decontamination", mode: 'copy'
 
     label 'decontamination_report'
-    tag "$sample_name"
+    tag "$meta.id"
     container 'quay.io/microbiome-informatics/bwamem2:2.2.1'
 
     input:
-    val sample_name
-    val mode
-    path cleaned_reads
+    tuple val(meta), val(cleaned_reads), val(sample_d)
 
     output:
-    val sample_name, emit: sample_name
-    path "decontamination_output_report.txt", emit: decontamination_report
+    tuple val(meta), path("decontamination_output_report.txt")
 
     script:
     def input_f_reads = "";
     def input_r_reads = "";
-    if ( mode == "paired" ) {
+    if ( sample_d.mode == "paired" ) {
         if (cleaned_reads[0].name.contains('_1')) {
             input_f_reads = cleaned_reads[0]
             input_r_reads = cleaned_reads[1]
@@ -117,12 +111,12 @@ process DECONTAMINATION_REPORT {
         zcat ${input_f_reads} | grep '@' | wc -l > decontamination_output_report.txt
         zcat ${input_r_reads} | grep '@' | wc -l >> decontamination_output_report.txt
         """
-    } else if ( mode == "single" ) {
+    } else if ( sample_d.mode == "single" ) {
         """
         zcat ${cleaned_reads} | grep '@' | wc -l > decontamination_output_report.txt
         """
     } else {
-        error "Invalid mode: ${mode}"
+        error "Invalid mode: ${sample_d.mode}"
     }
 }
 

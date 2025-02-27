@@ -5,10 +5,10 @@
 process KRONA {
 
     label 'krona'
-    tag "${sample_name}"
+    tag "${meta.seq_id} - ${meta.db_id}"
     
     publishDir(
-        "${params.outdir}/taxonomy/${sample_name}/${otu_label}",
+        "${params.outdir}/taxonomy/${meta.seq_id}/${meta.db_id}",
         mode: 'copy',
         pattern: "*krona.html"
     )
@@ -16,16 +16,13 @@ process KRONA {
     container 'quay.io/biocontainers/krona:2.7.1--pl5321hdfd78af_7'
 
     input:
-    val sample_name
-    val otu_label
-    path otu_counts
+    tuple val(meta), path(tsv), path(txt), path(tsv_notaxid)
 
     output:
-    val sample_name, emit: sample_name
-    path "*krona.html", emit: krona_html
+    tuple val(meta), path("*krona.html")
 
     script:
     """
-    ktImportText -o "${sample_name}_${otu_label}_krona.html" $otu_counts
+    ktImportText -o "${meta.seq_id}_${meta.db_id}_krona.html" $tsv
     """
 }
